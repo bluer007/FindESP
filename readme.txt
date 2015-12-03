@@ -8,7 +8,7 @@
 Software: FindESP
 How it uses: 
 input the drive letter, if the kind of partition table is gpt, it outputs esp partition letter, or it outputs nothing.
-Platform: C++ + VS2015 +win10_x64_build10586
+Platform: C++ + VS2015 + win10_x64_build10586
 Author: Bluer
 Time: Dec. 3, 2015
 
