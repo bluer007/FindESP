@@ -1,11 +1,33 @@
 
-
-
 #include <Windows.h>  
 #include <Winbase.h>  //the head file of GetFirmwareEnvironmentVariableA and GetFirmwareType 
 #include <iostream>  
 #include <TCHAR.H>
 using namespace std;
+
+#ifdef UNICODE
+#define tcout std::wcout
+#else
+#define tcout std::cout
+#endif
+
+
+typedef enum
+{
+	MYERROR_SUCCESS = 0,
+	MYERROR_INVALID_PARAMETER = 1,
+	MYERROR_NONE_PARAMETER = 2
+}ERROR_CODE;
+
+LPCTSTR ErrorStrArray[] =
+{
+	//MYERROR_SUCCESS = 0,
+	TEXT(""),
+	//MYERROR_INVALID_PARAMETER = 1,
+	TEXT("error: invalid parameters.\n"),
+	//MYERROR_NONE_PARAMETER = 2
+	TEXT("error: none parameters.\n")
+};
 
 typedef int(*ParameterFun)(LPCTSTR arg1);
 
@@ -19,13 +41,31 @@ typedef struct
 
 int cmdDrive(LPCTSTR drive)
 {
-	wcout << drive << endl;
+	if (!('a' <= *drive && *drive <= 'z') ||
+		*(drive + 1) != '\0')
+	{
+		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
+		return -1;
+	}
+
+	tcout << drive << endl;
 	return 0;
 }
 
 int cmdDisk(LPCTSTR disk)
 {
-	wcout << disk << endl;
+	LPCTSTR diskNum = disk;
+	while (*diskNum != '\0')
+	{
+		if (!('0' <= *diskNum && *diskNum <= '9'))
+		{
+			tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
+			return -1;
+		}
+		diskNum++;
+	}
+	
+	tcout << disk << endl;
 	return 0;
 }
 
@@ -36,43 +76,21 @@ ParameterEntry ParameterTable[] =
 };
 
 
-typedef struct
-{
-	int error_code;
-	LPCTSTR error_str;
-}ERROR_STR;
-
-typedef enum 
-{
-	MYERROR_SUCCESS = 0,
-	MYERROR_INVALID_PARAMETER = 1,
-	MYERROR_NONE_PARAMETER = 2
-
-}ERROR_CODE;
-
-ERROR_STR ErrorArray[] =
-{
-	{MYERROR_SUCCESS, TEXT("")},
-	{MYERROR_INVALID_PARAMETER, TEXT("error: invalid parameters.\n")},
-	{MYERROR_NONE_PARAMETER, TEXT("error: none parameters.\n")}
-};
-
 void preProcess(TCHAR* str)
 {
 	//set all the characters to lower case
 	while (*str != '\0')
 	{
-		if ('A' < *str && *str < 'Z')
+		if ('A' <= *str && *str <= 'Z')
 			*str += 32;
 		str++;
 	}
 }
 
-
-int wmain(int argc, wchar_t** arg)
+int _tmain(int argc, TCHAR* arg[])
 {
-	//make wcout() can output chinese
-	std::wcout.imbue(std::locale("chinese"));
+	//make wcout/cout can output chinese
+	tcout.imbue(std::locale("chinese"));
 
 	int firstArg = 1;
 	int sizeParameterTable = sizeof(ParameterTable) / sizeof(ParameterEntry);
@@ -93,7 +111,7 @@ int wmain(int argc, wchar_t** arg)
 				}
 				else
 				{
-					wcout << ErrorArray[MYERROR_INVALID_PARAMETER].error_str;
+					tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
 					return MYERROR_INVALID_PARAMETER;
 				}
 			}
@@ -103,26 +121,15 @@ int wmain(int argc, wchar_t** arg)
 	}
 	if (argc == 1)
 	{
-		wcout << ErrorArray[MYERROR_NONE_PARAMETER].error_str;
+		tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
 		return MYERROR_NONE_PARAMETER;
 	}
 	else
 	{
-		wcout << ErrorArray[MYERROR_INVALID_PARAMETER].error_str;
+		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
 		return MYERROR_INVALID_PARAMETER;
 	}
 	
 
-	/*
-	//Windows 7/Server 2008R2 and above valid
-	GetFirmwareEnvironmentVariableA((""), "{00000000-0000-0000-0000-000000000000}", NULL, 0);
-	if (GetLastError() == ERROR_INVALID_FUNCTION)
-		//API not supported; this is a legacy BIOS  
-		cout << "Bios引导" << endl;
-	else
-		//API error (expected) but call is supported.This is UEFI.  
-		cout << "Uefi引导" << endl;
-
-*/
 
 }
