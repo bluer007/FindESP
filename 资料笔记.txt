@@ -1,0 +1,72 @@
+c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+
+ESP分区专门的 GUID {C12A7328-F81F-11D2-BA4B-00A0C93EC93B}
+
+((parInfo).Gpt).PartitionId {01E8581E-C04F-445D-8D66-4BDCFC83E1AB}
+1E 58 E8 01 4F C0 5D 44 8D 66 4B DC FC 83 E1 AB
+
+判断mbr和gpt磁盘的io控制码			DISK_PARTITION_INFO 		
+查询gpt分区各种信息, 如guid		PARTITION_INFORMATION_GPT 或者 增强版	PARTITION_INFORMATION_EX (还可以判断mbr和gpt)		即IOCTL_DISK_GET_PARTITION_INFO_EX
+
+判断有多少个分区在一个磁盘上	IOCTL_DISK_GET_DRIVE_LAYOUT_EX
+
+读取分区表信息		查询gpt分区各种信息, 如guid		IoReadPartitionTableEx		即 IOCTL_DISK_GET_DRIVE_LAYOUT_EX
+
+
+获取分区在第几个磁盘上						IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS
+
+msr和esp分区没有Volume{048ee1aa-5619-4ca1-a845-dfe8ea8f5288}
+
+从挂载点查询guid名字(guid path)			从E:\得到\\?\Volume{9e3c5278-b9cd-4a25-a7a2-bc69f1e6c2e4}\
+GetVolumeNameForVolumeMountPoint(
+		argv[2],    //输入挂载点或目录E:\
+		Buf,          //输出卷名\\?\Volume{9e3c5278-b9cd-4a25-a7a2-bc69f1e6c2e4}\		即GUIS paths
+		BUFSIZE
+		);
+
+ uses volume	GUID paths to identify volumes. These are strings of this form:	"\\?\Volume{GUID}\"
+
+获得挂载到指定卷的挂载目录名	FindFirstVolumeMountPoint, FindNextVolumeMountPoint,  FindVolumeMountPointClose	
+若E:\挂载到D:\1\ 		输入\\?\Volume{9e3c5278-b9cd-4a25-a7a2-bc69f1e6c2e4}\	(对应D盘)   输出1\		(对应D:\1\)
+
+枚举各个卷GUID名(不会枚举到esp, msr分区, 可能这两个分区没有卷名)			FindFirstVolume				无输入    输出\\?\Volume{6f1d050d-b1df-4ca7-9c71-a26df8c3fba5}\
+
+查询设备名字		QueryDosDevice		
+输入	Volume{6f1d050d-b1df-4ca7-9c71-a26df8c3fba5}    输出\Device\HarddiskVolume3
+输入	C:   输出\Device\HarddiskVolume3
+输入	\Device\HarddiskVolume3   输出""(空字符)
+输入	Harddisk0Partition2   输出\Device\HarddiskVolume2
+感觉就是winobj工具的反映的结果
+
+根据设备guid名字返回卷挂载到的路径		GetVolumePathNamesForVolumeName		
+如输入\\?\Volume{9e3c5278-b9cd-4a25-a7a2-bc69f1e6c2e4}\	输出D:\
+或者输入\\?\Volume{9b7a545d-9d58-494d-b715-8523e381a955}\			输出E:\ 和1\				(此卷挂载到E和d:\1)
+		
+Naming a Volume (Windows)		(bluer: 怎么命名一个卷和用createfile怎么打开一个卷, 即对createfile传参//?/Volume{242bdeab-9da1-4faa-a7e2-a5515d9d5a9d}	或\\?\Volume{242bdeab-9da1-4faa-a7e2-a5515d9d5a9d}		实测不能使用"/Device/HarddiskVolume1或带后缀","/Device/Harddisk0/Partition1或带后缀", \\?\Volume{242bdeab-9da1-4faa-a7e2-a5515d9d5a9d}\或者前缀\\?\或者前缀\\.\传参)
+https://msdn.microsoft.com/en-us/library/aa365248.aspx
+
+createfile		可以传参打开驱动器或磁盘, 如输入\\.\2:(用DefineDosDevice先定义)或输入\\?\Volume{242bdeab-9da1-4faa-a7e2-a5515d9d5a9d}
+
+持久性挂载 	SetVolumeMountPoint			输入X:\或者Y:\MountX\			和 \\?\Volume{9e3c5278-b9cd-4a25-a7a2-bc69f1e6c2e4}\
+
+设置卷标(和重命名分区/卷效果一样)		SetVolumeLabel		输入G:\  和  "卷标名字符串"
+
+获取卷信息			GetVolumeInformation			主要输入 C:\			输出卷标, 文件系统名字(NTFS或FAT等), 文件系统属性(如有无压缩卷等), 卷序列号(即该分区的序列号, 不是GUID)
+
+获得某一个路径的根挂载点   			GetVolumePathName		输入E:\1\2\		输出E:\		若E:\挂载到D:\1\ 		输入D:\1\PE\    输出D:\1\
+
+挂载esp分区
+DefineDosDevice(DDD_RAW_TARGET_PATH, "O:", "\\Device\\HarddiskVolume1");
+DefineDosDevice(DDD_RAW_TARGET_PATH, "Y:", "\\Device\\Harddisk0\\Partition1");
+
+卸载esp分区
+DefineDosDevice(DDD_REMOVE_DEFINITION | DDD_EXACT_MATCH_ON_REMOVE | DDD_RAW_TARGET_PATH, "O:", "\\Device\\HarddiskVolume1");
+
+
+根据磁盘句柄找到磁盘的下标号	或者 根据分区句柄(\\.\d:)找到分区和磁盘的下标号			IOCTL_STORAGE_GET_DEVICE_NUMBER
+
+枚举当前所有盘符(对esp分区有效)		DWORD len = ::GetLogicalDriveStrings(sizeof(Drive) / sizeof(TCHAR), Drive);
+
+
+
+
