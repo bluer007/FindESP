@@ -55,8 +55,10 @@ DiskInfo diskInfo = {0};
 #define PARTITION_NUMBER(deviceNum)	((DWORD)deviceNum & 0x0000FFFF)
 typedef DWORD DEVNUM;	//new type. use to record disk number and partition number
 
+
+
 //record partition information, such as file system name, disk and partition number
-map<DEVNUM, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE]> partitionInfo;
+map < DEVNUM, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE] > partitionInfo;
 
 vector<DEVNUM> allESP;
 
@@ -508,8 +510,12 @@ bool GetAllESP()
 		{
 			for (DWORD i = 0; i < partitionInfo->PartitionCount; i++)
 			{
+				//judge ESP partition by esp guid
 				if (GuidESP == partitionInfo->PartitionEntry[i].Gpt.PartitionType)
 				{
+					if ()
+					{
+					}
 					diskNum = diskInfo.aryDisk[disktotal];
 					partitionNum = partitionInfo->PartitionEntry[i].PartitionNumber;
 					//add ESP partition data to allESP
@@ -533,35 +539,70 @@ ERROR_EXIT:
 
 
 
-bool MountESP(DEVNUM devnum)
+TCHAR MountPatition(DEVNUM devnum, TCHAR* dosName = nullptr)
 {
 	DWORD driveBitmap = GetLogicalDrives();
 	bool isFind = false;
-	int index = 26;
+	int index = 1;		//'B'-'A'==1
 	TCHAR drive[3] = {0};
 	TCHAR devName[20] = {0};
-	DWORD diskNum, partitionNum;
+	DWORD diskNum = DISK_NUMBER(devnum); 
+	DWORD partitionNum = PARTITION_NUMBER(devnum);
 	bool res = false;
-	while (!isFind && index > 0)
+	if (!dosName)
 	{
-		if ((driveBitmap >> (--index)) & 0x1)
+
+		while (!isFind && index < 25)
+		{
+			if ((driveBitmap >> (++index)) & 0x1)	//FOR drive letter between C: to Z:
+			{
+				isFind = true;
+				_stprintf_s(
+					drive,
+					TEXT("%c:"),
+					index + TEXT('A'));
+			}
+		}
+		if (driveBitmap & 0x1)	//for the drive letter A:
 		{
 			isFind = true;
-			diskNum = DISK_NUMBER(devnum);
-			partitionNum = PARTITION_NUMBER(devnum);
-			_stprintf_s(
-				drive, 
-				TEXT("%c:"), 
-				index + TEXT('A'));
-			_stprintf_s(
-				devName, 
-				TEXT("\\Device\\Harddisk%d\\Partition%d"), 
-				diskNum, partitionNum);
-			res = (bool)DefineDosDevice(DDD_RAW_TARGET_PATH, drive, devName);
+			_stprintf_s(drive, TEXT("A:"));
+
+		}
+		else if ((driveBitmap >> 1) & 0x1)		//for the drive letter B:
+		{
+			isFind = true;
+			_stprintf_s(drive, TEXT("B:"));
 		}
 	}
-	
-	return res;
+	else	//custom user dos name
+	{
+		isFind = true;
+		_stprintf_s(
+			drive,
+			TEXT("%c:"),
+			dosName[0]);
+	}
+
+	if (isFind)
+	{
+		_stprintf_s(
+			devName,
+			TEXT("\\Device\\Harddisk%d\\Partition%d"),
+			diskNum, partitionNum);
+		res = (bool)DefineDosDevice(DDD_RAW_TARGET_PATH, drive, devName);
+	}
+	if (res)
+		return drive[0];
+	else
+		return TEXT('0');
 }
 
+
+
+bool MountESP()
+{
+	
+
+}
 
