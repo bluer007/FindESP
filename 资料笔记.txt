@@ -52,7 +52,7 @@ createfile		©ирт╢╚╡н╢Р©╙гЩ╤╞фВ╩Р╢еел, хГйДхК\\.\2:(сцDefineDosDeviceох╤╗рЕ)╩РйДх
 
 иХжц╬М╠Й(╨мжьцЭцШ╥жгЬ/╬Мп╖╧Шр╩яЫ)		SetVolumeLabel		йДхКG:\  ╨м  "╬М╠ЙцШвж╥Ш╢╝"
 
-╩Ях║╬Мпео╒			GetVolumeInformation			жВр╙йДхК C:\			йДЁЖ╬М╠Й, нд╪Чо╣мЁцШвж(NTFS╩РFAT╣х), нд╪Чо╣мЁйТпт(хГспнчя╧кУ╬М╣х), ╬МпРап╨е(╪╢╦ц╥жгЬ╣дпРап╨е, ╡╩йгGUID)
+╩Ях║╬Мпео╒			GetVolumeInformation			жВр╙йДхК C:\, ╡Бйт╧ЩC:р╡пп			йДЁЖ╬М╠Й, нд╪Чо╣мЁцШвж(NTFS╩РFAT╣х), нд╪Чо╣мЁйТпт(хГспнчя╧кУ╬М╣х), ╬МпРап╨е(╪╢╦ц╥жгЬ╣дпРап╨е, ╡╩йгGUID)
 
 ╩Я╣цдЁр╩╦Жб╥╬╤╣д╦Ы╧рть╣Ц   			GetVolumePathName		йДхКE:\1\2\		йДЁЖE:\		хТE:\╧рть╣╫D:\1\ 		йДхКD:\1\PE\    йДЁЖD:\1\
 
@@ -62,7 +62,7 @@ DefineDosDevice(DDD_RAW_TARGET_PATH, "Y:", "\\Device\\Harddisk0\\Partition1");
 
 п╤тьesp╥жгЬ
 DefineDosDevice(DDD_REMOVE_DEFINITION | DDD_EXACT_MATCH_ON_REMOVE | DDD_RAW_TARGET_PATH, "O:", "\\Device\\HarddiskVolume1");
-
+DefineDosDevice(DDD_REMOVE_DEFINITION  , "O:", nullptr);		//ртиоа╫╬Джп╣дO:©ирт╩╩н╙9:
 
 ╦Ы╬щ╢еел╬Д╠Зур╣╫╢еел╣доб╠Й╨е	╩Руъ ╦Ы╬щ╥жгЬ╬Д╠З(\\.\d:)ур╣╫╥жгЬ╨м╢еел╣доб╠Й╨е			IOCTL_STORAGE_GET_DEVICE_NUMBER
 

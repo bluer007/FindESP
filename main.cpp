@@ -58,7 +58,7 @@ typedef DWORD DEVNUM;	//new type. use to record disk number and partition number
 
 
 //record partition information, such as file system name, disk and partition number
-map < DEVNUM, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE] > partitionInfo;
+map < DEVNUM, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE]> partitionInfo;
 
 vector<DEVNUM> allESP;
 
@@ -94,6 +94,10 @@ bool GetVolumeInfo(
 	int fileSystemSize = 0,
 	TCHAR* volumeName = nullptr,
 	int volumeNameSize = 0);
+const TCHAR MountPartition(
+	DEVNUM devnum,
+	TCHAR* dosName = nullptr,
+	bool isUnmount = false);
 
 int cmdDrive(LPCTSTR drive)
 {
@@ -467,13 +471,13 @@ bool GetVolumeInfo(
 {
 	DWORD dwSysFlags;
 	return GetVolumeInformation(volume,
-		fileSystem,
-		fileSystemSize,
+		volumeName,
+		volumeNameSize,
 		nullptr,
 		nullptr,
 		&dwSysFlags,
-		volumeName,
-		volumeNameSize
+		fileSystem,
+		fileSystemSize
 		)? true : false;
 }
 
@@ -494,6 +498,7 @@ bool GetAllESP()
 		{ 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B } 
 	};
 
+	TCHAR tmpTargetName[] = TEXT("2:");
 	HANDLE handle = INVALID_HANDLE_VALUE;
 	DEVNUM diskNum, partitionNum;
 	DRIVE_LAYOUT_INFORMATION_EX partitionInfo[20] = {0};
@@ -513,13 +518,25 @@ bool GetAllESP()
 				//judge ESP partition by esp guid
 				if (GuidESP == partitionInfo->PartitionEntry[i].Gpt.PartitionType)
 				{
-					if ()
+					//mount partition for getting file system on it
+					if (MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], i), 
+						tmpTargetName) == tmpTargetName[0])
 					{
+						TCHAR fileSystem[10];
+						GetVolumeInfo(tmpTargetName, fileSystem, 10);
+						//ESP partition filesystem is fat or fat32
+						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 &&
+							 _tcsicmp(fileSystem, TEXT("fat32")) == 0)
+						{
+							diskNum = diskInfo.aryDisk[disktotal];
+							partitionNum = partitionInfo->PartitionEntry[i].PartitionNumber;
+							//add ESP partition data to allESP
+							allESP.push_back(DEVICE_NUMBER(diskNum, partitionNum));
+						}
+						//unmount the partition after getting file system 
+						MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], i), 
+							tmpTargetName, true);
 					}
-					diskNum = diskInfo.aryDisk[disktotal];
-					partitionNum = partitionInfo->PartitionEntry[i].PartitionNumber;
-					//add ESP partition data to allESP
-					allESP.push_back(DEVICE_NUMBER(diskNum, partitionNum));
 				}		
 			}
 		}
@@ -539,49 +556,76 @@ ERROR_EXIT:
 
 
 
-TCHAR MountPatition(DEVNUM devnum, TCHAR* dosName = nullptr)
+const TCHAR MountPartition(
+	DEVNUM devnum, 
+	TCHAR* dosName /*= nullptr*/, 
+	bool isUnmount /*= false*/)
 {
 	DWORD driveBitmap = GetLogicalDrives();
 	bool isFind = false;
 	int index = 1;		//'B'-'A'==1
 	TCHAR drive[3] = {0};
 	TCHAR devName[20] = {0};
+	TCHAR targetName[MAX_PATH + 1];
 	DWORD diskNum = DISK_NUMBER(devnum); 
 	DWORD partitionNum = PARTITION_NUMBER(devnum);
 	bool res = false;
-	if (!dosName)
+	//for unmount partition operation
+	if (dosName && isUnmount)
 	{
-
-		while (!isFind && index < 25)
-		{
-			if ((driveBitmap >> (++index)) & 0x1)	//FOR drive letter between C: to Z:
-			{
-				isFind = true;
-				_stprintf_s(
-					drive,
-					TEXT("%c:"),
-					index + TEXT('A'));
-			}
-		}
-		if (driveBitmap & 0x1)	//for the drive letter A:
-		{
-			isFind = true;
-			_stprintf_s(drive, TEXT("A:"));
-
-		}
-		else if ((driveBitmap >> 1) & 0x1)		//for the drive letter B:
-		{
-			isFind = true;
-			_stprintf_s(drive, TEXT("B:"));
-		}
-	}
-	else	//custom user dos name
-	{
-		isFind = true;
 		_stprintf_s(
 			drive,
 			TEXT("%c:"),
 			dosName[0]);
+		res = (bool)DefineDosDevice(
+			DDD_REMOVE_DEFINITION ,
+			drive,
+			nullptr);
+		if (res)
+			return drive[0];
+		else
+			return TEXT('\0');
+	}
+
+	//for mount partition operation
+	if (!dosName)
+	{
+		while (!isFind && index < 25)
+		{
+			if ((driveBitmap >> (++index)) & 0x1)	//FOR drive letter between C: to Z:
+			{
+				_stprintf_s(
+					drive,
+					TEXT("%c:"),
+					index + TEXT('A'));
+				//QueryDosDevice() == 0 indicates the dos device name does not define
+				if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
+					isFind = true;
+				else
+					continue;
+			}
+		}
+		if (driveBitmap & 0x1)	//for the drive letter A:
+		{
+			_stprintf_s(drive, TEXT("A:"));
+			if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
+				isFind = true;
+		}
+		else if ((driveBitmap >> 1) & 0x1)		//for the drive letter B:
+		{
+			_stprintf_s(drive, TEXT("B:"));
+			if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
+				isFind = true;
+		}
+	}
+	else	//custom user dos name
+	{
+		_stprintf_s(
+			drive,
+			TEXT("%c:"),
+			dosName[0]);
+		if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
+			isFind = true;
 	}
 
 	if (isFind)
@@ -595,7 +639,7 @@ TCHAR MountPatition(DEVNUM devnum, TCHAR* dosName = nullptr)
 	if (res)
 		return drive[0];
 	else
-		return TEXT('0');
+		return TEXT('\0');
 }
 
 
