@@ -22,10 +22,15 @@ using namespace std;
 typedef enum
 {
 	MYERROR_SUCCESS = 0,
-	MYERROR_INVALID_PARAMETER = 1,
-	MYERROR_NONE_PARAMETER = 2,
-	MYERROR_NOT_HARD_DISK =3,
-	MYERROR_CANNOT_GET_DISK_NUMBER = 4
+	MYERROR_FAIL,
+	MYERROR_INVALID_PARAMETER,
+	MYERROR_NONE_PARAMETER,
+	MYERROR_NOT_HARD_DISK,
+	MYERROR_CANNOT_GET_DISK_NUMBER,
+	MYERROR_CANNOT_GET_ESP_INFO,
+	MYERROR_NOT_EXIST_DRIVE,
+	MYERROR_NOT_EXIST_DISK,
+	MYERROR_CANNOT_FIND_ESP
 }ERROR_CODE;
 
 enum 
@@ -53,27 +58,52 @@ DiskInfo diskInfo = {0};
 #define DEVICE_NUMBER(diskNum, partitionNum)	(((DWORD)diskNum << 16) | (DWORD)partitionNum)
 #define DISK_NUMBER(deviceNum)	(((DWORD)deviceNum >> 16) & 0x0000FFFF)
 #define PARTITION_NUMBER(deviceNum)	((DWORD)deviceNum & 0x0000FFFF)
-typedef DWORD DEVNUM;	//new type. use to record disk number and partition number
+typedef DWORD DEVNUM;	//define new type. use to record disk number and partition number
 
 
+typedef struct 
+{
+	union
+	{
+		DEVNUM deviceNum;
+		struct
+		{
+			DWORD diskNum;
+			DWORD partitionNum;
+		};
+	};
+	TCHAR fileSystem[MAX_FILE_SYSTEM_NAME_SIZE];
+	TCHAR mountDrive[3];
+}PartitionInfo;
 
 //record partition information, such as file system name, disk and partition number
-map < DEVNUM, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE]> partitionInfo;
+map <DEVNUM, PartitionInfo> partitionInfo;
 
-vector<DEVNUM> allESP;
+//record information of all ESP partitions
+map <DEVNUM, PartitionInfo> allESP;
 
 LPCTSTR ErrorStrArray[] =
 {
-	//MYERROR_SUCCESS = 0,
+	//MYERROR_SUCCESS
 	TEXT(""),
-	//MYERROR_INVALID_PARAMETER = 1,
+	//MYERROR_FAIL
+	TEXT("error: can't mount ESP partitions.\n"),
+	//MYERROR_INVALID_PARAMETER
 	TEXT("error: invalid parameters.\n"),
-	//MYERROR_NONE_PARAMETER = 2
+	//MYERROR_NONE_PARAMETER
 	TEXT("error: none parameters.\n"),
-	//MYERROR_NOT_HARD_DISK =3
+	//MYERROR_NOT_HARD_DISK
 	TEXT("error: drive entered is not a hard disk drive.\n"),
-	//MYERROR_CANNOT_GET_DISK_NUMBER = 4
-	TEXT("error: can't get disk number, maybe you can run as admin.\n")
+	//MYERROR_CANNOT_GET_DISK_NUMBER
+	TEXT("error: can't get disk number, maybe you can run as admin.\n"),
+	//MYERROR_CANNOT_GET_ESP_INFO
+	TEXT("error: can't get information of ESP partitions.\n"),
+	//MYERROR_NOT_EXIST_DRIVE,
+	TEXT("error: input a drive that does not exist.\n"),
+	//MYERROR_NOT_EXIST_DISK
+	TEXT("error: input a disk that does not exist.\n"),
+	//MYERROR_CANNOT_FIND_ESP
+	TEXT("error: can't find ESP partitions.\n")
 };
 
 typedef int(*ParameterFun)(LPCTSTR arg1);
@@ -88,6 +118,9 @@ typedef struct
 bool GetAllDiskNum();		//enum the disk to get all disk information
 HANDLE GetDiskHandleByNum(int num);	//get disk handle by disk number
 bool GetDeviceNumber(HANDLE handle, STORAGE_DEVICE_NUMBER* deviceNumber);
+bool GetCurDriveInfo();
+bool MountESP();
+bool GetAllESP();
 bool GetVolumeInfo(
 	TCHAR* volume,
 	TCHAR* fileSystem = nullptr,
@@ -115,12 +148,6 @@ int cmdDrive(LPCTSTR drive)
 		return -1;
 	}
 
-	if (!GetAllDiskNum())
-	{
-		tcout << ErrorStrArray[MYERROR_CANNOT_GET_DISK_NUMBER];
-		return -1;
-	}
-
 	TCHAR str[10] = {0};
 	_stprintf_s(str, TEXT("\\\\.\\%c:"), *drive);
 	HANDLE handle = CreateFile(str, 
@@ -130,9 +157,45 @@ int cmdDrive(LPCTSTR drive)
 		OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
 		NULL);
-	//GetDiskHandleByNum();
-	
-	tcout << drive << endl;
+
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		//input a drive that does not exist
+		tcout << ErrorStrArray[MYERROR_NOT_EXIST_DRIVE];
+		return -1;
+	}
+
+	STORAGE_DEVICE_NUMBER deviceNum;
+	if (!GetDeviceNumber(handle, &deviceNum))
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_GET_DISK_NUMBER];
+		return -1;
+	}
+
+	//mount all ESP partitions
+	if (!MountESP())
+	{
+		tcout << ErrorStrArray[MYERROR_FAIL];
+		return -1;
+	}
+
+	bool isFind = false;
+	map<DEVNUM, PartitionInfo>::iterator espIter;
+	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
+	{
+		if (espIter->second.diskNum == deviceNum.DeviceNumber)
+		{
+			tcout << espIter->second.mountDrive << TEXT("  ");
+			isFind = true;
+		}
+	}
+
+	if (!isFind)
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -149,7 +212,31 @@ int cmdDisk(LPCTSTR disk)
 		diskNum++;
 	}
 	
-	tcout << disk << endl;
+	DWORD num = _ttoi(disk);
+
+	//mount all ESP partitions
+	if (!MountESP())
+	{
+		tcout << ErrorStrArray[MYERROR_FAIL];
+		return -1;
+	}
+
+	bool isFind = false;
+	map<DEVNUM, PartitionInfo>::iterator espIter;
+	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
+	{
+		if (espIter->second.diskNum == num)
+		{
+			tcout << espIter->second.mountDrive << TEXT("  ");
+			isFind = true;
+		}
+	}
+
+	if (!isFind)
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
+		return -1;
+	}
 	return 0;
 }
 
@@ -160,7 +247,7 @@ ParameterEntry ParameterTable[] =
 };
 
 
-void preProcess(TCHAR* str)
+void PreProcessArg(TCHAR* str)
 {
 	//set all the characters to lower case
 	while (*str != '\0')
@@ -169,6 +256,31 @@ void preProcess(TCHAR* str)
 			*str += 32;
 		str++;
 	}
+}
+
+bool PreProcessMount()
+{
+	//preprocess for mounting ESP partitions
+	//get current all disks
+	if (!GetAllDiskNum())
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_GET_DISK_NUMBER];
+		return false;
+	}
+	//get current drives information,no matter success or fail
+	GetCurDriveInfo();
+	//only get information of all esp partitions, not mounting
+	if (!GetAllESP())
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_GET_ESP_INFO];
+		return false;
+	}
+	if (allESP.empty())
+	{
+		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
+		return false;
+	}
+	return true;
 }
 
 int _tmain(int argc, TCHAR* arg[])
@@ -182,7 +294,7 @@ int _tmain(int argc, TCHAR* arg[])
 	//According parameters to the called function
 	while (argc > firstArg)
 	{
-		preProcess(arg[firstArg]);
+		PreProcessArg(arg[firstArg]);
 		for (int index = 0; index < sizeParameterTable; index++)
 		{
 			if((_tcsstr(arg[firstArg], ParameterTable[index].cmd) - arg[firstArg] == 1) &&
@@ -192,12 +304,12 @@ int _tmain(int argc, TCHAR* arg[])
 				if (_tcslen(arg[firstArg]) > _tcslen(ParameterTable[index].cmd) + 2)
 				{
 					int res = ParameterTable[index].fun(&(arg[firstArg][_tcslen(ParameterTable[index].cmd) + 2]));
-					return res ? MYERROR_INVALID_PARAMETER : MYERROR_SUCCESS;
+					return res ? MYERROR_FAIL : MYERROR_SUCCESS;
 				}
 				else
 				{
 					tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
-					return MYERROR_INVALID_PARAMETER;
+					return MYERROR_FAIL;
 				}
 			}
 		}
@@ -206,13 +318,20 @@ int _tmain(int argc, TCHAR* arg[])
 	}
 	if (argc == 1)
 	{
-		tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
-		return MYERROR_NONE_PARAMETER;
+		//tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
+		//return MYERROR_NONE_PARAMETER;
+
+		//call program without parameters will mount all ESP partitions
+		if (MountESP())
+			return MYERROR_SUCCESS;
+		else
+			return MYERROR_FAIL;
+			
 	}
 	else
 	{
 		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
-		return MYERROR_INVALID_PARAMETER;
+		return MYERROR_FAIL;
 	}
 	
 
@@ -350,10 +469,10 @@ HANDLE GetDiskHandleByNum(int num)
 **************/
 bool GetPartitionInfo(HANDLE diskHandle, DRIVE_LAYOUT_INFORMATION_EX* info, int infoSize)
 {
-	bool res = 0;
+	BOOL res = 0;
 
 	DWORD bytesReturned = 0;
-	res = (bool)DeviceIoControl(diskHandle,
+	res = DeviceIoControl(diskHandle,
 		IOCTL_DISK_GET_DRIVE_LAYOUT_EX,
 		nullptr,
 		0,
@@ -377,24 +496,25 @@ bool GetCurDriveInfo()
 {
 	TCHAR Drive[MAX_PATH] = { 0 };
 	DWORD i = 0;
-	TCHAR FileSysNameBuf[MAX_FILE_SYSTEM_NAME_SIZE] = { 0 };
+	PartitionInfo info = {0};
 	TCHAR driveName[20];
 	STORAGE_DEVICE_NUMBER deviceNumber = { 0 };
 	HANDLE partition = INVALID_HANDLE_VALUE;
-
+	
 	DWORD len = ::GetLogicalDriveStrings(sizeof(Drive) / sizeof(TCHAR), Drive);
 	if (len <= 0)
 		goto ERROR_EXIT;
+	
+	partitionInfo.clear();
 
-	partitionInfo.erase(partitionInfo.begin(), partitionInfo.end());
 	while (Drive[i])
 	{
-		//cout << Drive[i] << endl;
+		//cout << Drive[i] << endl;		//optput such as C:\\
 
 		//get the file system type name
 		if (!GetVolumeInfo(
 			&Drive[i],
-			FileSysNameBuf,
+			info.fileSystem,
 			MAX_FILE_SYSTEM_NAME_SIZE))
 			goto ERROR_EXIT;
 
@@ -416,11 +536,15 @@ bool GetCurDriveInfo()
 
 		CloseHandle(partition);
 
-		//insert data to map, 
-		//key indicates disk and partition number, 
-		//second value indicates file system name
-		partitionInfo.insert(map<DWORD, TCHAR[MAX_FILE_SYSTEM_NAME_SIZE]>::value_type((deviceNumber.DeviceNumber << 16) | (deviceNumber.PartitionNumber), 
-			FileSysNameBuf));
+		//record partition information
+		_stprintf_s(info.mountDrive, TEXT("%c:"), Drive[i]);
+		info.diskNum = deviceNumber.DeviceNumber;
+		info.partitionNum = deviceNumber.PartitionNumber;
+		
+		//insert data to map
+		partitionInfo.insert(map<DEVNUM, PartitionInfo>::value_type(
+			DEVICE_NUMBER(deviceNumber.DeviceNumber, deviceNumber.PartitionNumber),
+			info));
 
 		//switch to next partition		
 		i += (_tcslen(&Drive[i]) + 1);	
@@ -429,7 +553,7 @@ bool GetCurDriveInfo()
 	return true;
 
 ERROR_EXIT:
-	partitionInfo.erase(partitionInfo.begin(), partitionInfo.end());
+	partitionInfo.clear();
 	return false;
 }
 
@@ -437,7 +561,7 @@ ERROR_EXIT:
 
 /**************
 *	function: GetDeviceNumber();
-*	work: get disk number or disk number
+*	work: get disk number or partition number
 *	return:
 *	return true if success, otherwise false
 **************/
@@ -500,10 +624,10 @@ bool GetAllESP()
 
 	TCHAR tmpTargetName[] = TEXT("2:");
 	HANDLE handle = INVALID_HANDLE_VALUE;
-	DEVNUM diskNum, partitionNum;
+	PartitionInfo info;
 	DRIVE_LAYOUT_INFORMATION_EX partitionInfo[20] = {0};
 	int disktotal = diskInfo.diskTotal;
-	allESP.erase(allESP.begin(), allESP.end());
+	allESP.clear();
 	while (disktotal--)
 	{
 		handle = GetDiskHandleByNum(diskInfo.aryDisk[disktotal]);
@@ -528,10 +652,17 @@ bool GetAllESP()
 						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 &&
 							 _tcsicmp(fileSystem, TEXT("fat32")) == 0)
 						{
-							diskNum = diskInfo.aryDisk[disktotal];
-							partitionNum = partitionInfo->PartitionEntry[i].PartitionNumber;
+							memset(&info, 0, sizeof(info));
+
+							//set information of ESP partition except for mountDrive
+							info.diskNum = diskInfo.aryDisk[disktotal];
+							info.partitionNum = partitionInfo->PartitionEntry[i].PartitionNumber;
+							_tcscpy_s(info.fileSystem, fileSystem);
+							
 							//add ESP partition data to allESP
-							allESP.push_back(DEVICE_NUMBER(diskNum, partitionNum));
+							allESP.insert(map<DEVNUM, PartitionInfo>::value_type(
+								DEVICE_NUMBER(info.diskNum, info.partitionNum),
+								info));
 						}
 						//unmount the partition after getting file system 
 						MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], i), 
@@ -546,7 +677,7 @@ bool GetAllESP()
 	return true;
 
 ERROR_EXIT:
-	allESP.erase(allESP.begin(), allESP.end());
+	allESP.clear();
 	if (INVALID_HANDLE_VALUE != handle)
 		CloseHandle(handle);
 
@@ -569,7 +700,7 @@ const TCHAR MountPartition(
 	TCHAR targetName[MAX_PATH + 1];
 	DWORD diskNum = DISK_NUMBER(devnum); 
 	DWORD partitionNum = PARTITION_NUMBER(devnum);
-	bool res = false;
+	BOOL res = false;
 	//for unmount partition operation
 	if (dosName && isUnmount)
 	{
@@ -577,7 +708,7 @@ const TCHAR MountPartition(
 			drive,
 			TEXT("%c:"),
 			dosName[0]);
-		res = (bool)DefineDosDevice(
+		res = DefineDosDevice(
 			DDD_REMOVE_DEFINITION ,
 			drive,
 			nullptr);
@@ -618,7 +749,7 @@ const TCHAR MountPartition(
 				isFind = true;
 		}
 	}
-	else	//custom user dos name
+	else	//user custom dos name
 	{
 		_stprintf_s(
 			drive,
@@ -634,7 +765,7 @@ const TCHAR MountPartition(
 			devName,
 			TEXT("\\Device\\Harddisk%d\\Partition%d"),
 			diskNum, partitionNum);
-		res = (bool)DefineDosDevice(DDD_RAW_TARGET_PATH, drive, devName);
+		res = DefineDosDevice(DDD_RAW_TARGET_PATH, drive, devName);
 	}
 	if (res)
 		return drive[0];
@@ -646,7 +777,44 @@ const TCHAR MountPartition(
 
 bool MountESP()
 {
-	
+	if (!PreProcessMount())
+		return false;
 
+	bool res = false;
+	TCHAR mountDrive = '\0';
+	map<DEVNUM, PartitionInfo>::iterator espIter, partitionIter;
+	
+	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
+	{
+		if ((partitionIter = partitionInfo.find(espIter->first))
+			!= partitionInfo.end())
+		{
+			//indicates this ESP partition has been mounted
+			//set mountDrive item of ESP partition
+			_tcscpy_s(espIter->second.mountDrive,
+				partitionIter->second.mountDrive);
+			//do not need to mount this esp partition
+			//output drive letter direct, such as D:disk0  
+			tcout << espIter->second.mountDrive[0] << TEXT(":disk")
+				<< espIter->second.partitionNum << TEXT("  ");
+			res = true;
+		}
+		else
+		{
+			//indicates this ESP partition hasn't been mounted
+			//To mount the esp partition
+			if (mountDrive = MountPartition(espIter->first))
+			{
+				//set mountDrive item of ESP partition
+				_stprintf_s(espIter->second.mountDrive, TEXT("%c:"), mountDrive);
+				//output format, such as E:disk2
+				tcout << mountDrive << TEXT(":disk")
+					<< espIter->second.partitionNum << TEXT("  ");
+				res = true;
+			}
+		}
+	}
+
+	return res;
 }
 
