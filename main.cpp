@@ -377,13 +377,12 @@ bool GetAllDiskNum()
 		deviceIndex,
 		&deviceInterfaceData)) 
 	{
-		if (!SetupDiGetDeviceInterfaceDetail(diskClassDevices,
+		SetupDiGetDeviceInterfaceDetail(diskClassDevices,
 			&deviceInterfaceData,
 			NULL,
 			0,
 			&requiredSize,
-			NULL))
-			goto EXIT;
+			NULL);
 
 		deviceInterfaceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
 		if (!deviceInterfaceDetailData)
@@ -531,7 +530,7 @@ bool GetCurDriveInfo()
 			goto ERROR_EXIT;
 
 		//get the partition number and disk number
-		if (GetDeviceNumber(partition, &deviceNumber))
+		if (!GetDeviceNumber(partition, &deviceNumber))
 			goto ERROR_EXIT;
 
 		CloseHandle(partition);
@@ -572,7 +571,7 @@ bool GetDeviceNumber(HANDLE handle, STORAGE_DEVICE_NUMBER* deviceNumber)
 		IOCTL_STORAGE_GET_DEVICE_NUMBER,
 		NULL,
 		0,
-		&deviceNumber,
+		deviceNumber,
 		sizeof(STORAGE_DEVICE_NUMBER),
 		&bytesReturned,
 		NULL)? true : false;
@@ -622,7 +621,7 @@ bool GetAllESP()
 		{ 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B } 
 	};
 
-	TCHAR tmpTargetName[] = TEXT("2:");
+	TCHAR tmpTargetName[] = TEXT("1:");
 	HANDLE handle = INVALID_HANDLE_VALUE;
 	PartitionInfo info;
 	DRIVE_LAYOUT_INFORMATION_EX partitionInfo[20] = {0};
@@ -643,13 +642,14 @@ bool GetAllESP()
 				if (GuidESP == partitionInfo->PartitionEntry[i].Gpt.PartitionType)
 				{
 					//mount partition for getting file system on it
-					if (MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], i), 
+					if (MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], 
+							partitionInfo->PartitionEntry[i].PartitionNumber),
 						tmpTargetName) == tmpTargetName[0])
 					{
 						TCHAR fileSystem[10];
 						GetVolumeInfo(tmpTargetName, fileSystem, 10);
 						//ESP partition filesystem is fat or fat32
-						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 &&
+						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 ||
 							 _tcsicmp(fileSystem, TEXT("fat32")) == 0)
 						{
 							memset(&info, 0, sizeof(info));
@@ -665,7 +665,8 @@ bool GetAllESP()
 								info));
 						}
 						//unmount the partition after getting file system 
-						MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], i), 
+						MountPartition(DEVICE_NUMBER(diskInfo.aryDisk[disktotal], 
+							partitionInfo->PartitionEntry[i].PartitionNumber),
 							tmpTargetName, true);
 					}
 				}		
@@ -696,7 +697,7 @@ const TCHAR MountPartition(
 	bool isFind = false;
 	int index = 1;		//'B'-'A'==1
 	TCHAR drive[3] = {0};
-	TCHAR devName[20] = {0};
+	TCHAR devName[50] = {0};
 	TCHAR targetName[MAX_PATH + 1];
 	DWORD diskNum = DISK_NUMBER(devnum); 
 	DWORD partitionNum = PARTITION_NUMBER(devnum);
@@ -723,7 +724,7 @@ const TCHAR MountPartition(
 	{
 		while (!isFind && index < 25)
 		{
-			if ((driveBitmap >> (++index)) & 0x1)	//FOR drive letter between C: to Z:
+			if (!((driveBitmap >> (++index)) & 0x1))	//FOR drive letter between C: to Z:
 			{
 				_stprintf_s(
 					drive,
@@ -736,13 +737,13 @@ const TCHAR MountPartition(
 					continue;
 			}
 		}
-		if (driveBitmap & 0x1)	//for the drive letter A:
+		if (!isFind && !(driveBitmap & 0x1))	//for the drive letter A:
 		{
 			_stprintf_s(drive, TEXT("A:"));
 			if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
 				isFind = true;
 		}
-		else if ((driveBitmap >> 1) & 0x1)		//for the drive letter B:
+		else if (!isFind && !((driveBitmap >> 1) & 0x1))		//for the drive letter B:
 		{
 			_stprintf_s(drive, TEXT("B:"));
 			if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
@@ -796,7 +797,7 @@ bool MountESP()
 			//do not need to mount this esp partition
 			//output drive letter direct, such as D:disk0  
 			tcout << espIter->second.mountDrive[0] << TEXT(":disk")
-				<< espIter->second.partitionNum << TEXT("  ");
+				<< espIter->second.diskNum << TEXT("  ");
 			res = true;
 		}
 		else
@@ -809,7 +810,7 @@ bool MountESP()
 				_stprintf_s(espIter->second.mountDrive, TEXT("%c:"), mountDrive);
 				//output format, such as E:disk2
 				tcout << mountDrive << TEXT(":disk")
-					<< espIter->second.partitionNum << TEXT("  ");
+					<< espIter->second.diskNum << TEXT("  ");
 				res = true;
 			}
 		}
