@@ -141,16 +141,18 @@ int cmdDrive(LPCTSTR drive)
 		return -1;
 	}
 
+	TCHAR path[10] = { 0 };
+	_stprintf_s(path, TEXT("%c:\\"), *drive);
+
 	//judge whether the drive entered is a hard disk drive
-	if (DRIVE_FIXED != GetDriveType(drive))
+	if (DRIVE_FIXED != GetDriveType(path))
 	{
 		tcout << ErrorStrArray[MYERROR_NOT_HARD_DISK];
 		return -1;
 	}
 
-	TCHAR str[10] = {0};
-	_stprintf_s(str, TEXT("\\\\.\\%c:"), *drive);
-	HANDLE handle = CreateFile(str, 
+	_stprintf_s(path, TEXT("\\\\.\\%c:"), *drive);
+	HANDLE handle = CreateFile(path,
 		GENERIC_READ,
 		FILE_SHARE_READ | FILE_SHARE_WRITE,
 		NULL,
@@ -172,6 +174,12 @@ int cmdDrive(LPCTSTR drive)
 		return -1;
 	}
 
+	if (handle != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(handle);
+		handle = INVALID_HANDLE_VALUE;
+	}
+
 	//mount all ESP partitions
 	if (!MountESP())
 	{
@@ -185,7 +193,7 @@ int cmdDrive(LPCTSTR drive)
 	{
 		if (espIter->second.diskNum == deviceNum.DeviceNumber)
 		{
-			tcout << espIter->second.mountDrive << TEXT("  ");
+			tcout << *(espIter->second.mountDrive) << TEXT("  ");
 			isFind = true;
 		}
 	}
@@ -227,7 +235,7 @@ int cmdDisk(LPCTSTR disk)
 	{
 		if (espIter->second.diskNum == num)
 		{
-			tcout << espIter->second.mountDrive << TEXT("  ");
+			tcout << *(espIter->second.mountDrive) << TEXT("  ");
 			isFind = true;
 		}
 	}
@@ -412,6 +420,7 @@ bool GetAllDiskNum()
 		if (!GetDeviceNumber(disk, &diskNumber))
 			goto EXIT;
 
+		delete deviceInterfaceDetailData;
 		CloseHandle(disk);
 		disk = INVALID_HANDLE_VALUE;
 
@@ -815,7 +824,7 @@ bool MountESP()
 			}
 		}
 	}
-
+	if (res) tcout << endl;
 	return res;
 }
 
