@@ -119,8 +119,12 @@ bool GetAllDiskNum();		//enum the disk to get all disk information
 HANDLE GetDiskHandleByNum(int num);	//get disk handle by disk number
 bool GetDeviceNumber(HANDLE handle, STORAGE_DEVICE_NUMBER* deviceNumber);
 bool GetCurDriveInfo();
-bool MountESP();
+int MountAllESP(bool isMount);
 bool GetAllESP();
+int cmdDisk(LPCTSTR disk);
+int MountByDrive(LPCTSTR drive, bool isMount);
+int MountByDisk(LPCTSTR disk, bool isMount);
+int Usage();
 bool GetVolumeInfo(
 	TCHAR* volume,
 	TCHAR* fileSystem = nullptr,
@@ -132,15 +136,57 @@ const TCHAR MountPartition(
 	TCHAR* dosName = nullptr,
 	bool isUnmount = false);
 
-int cmdDrive(LPCTSTR drive)
+
+int cmdMount(LPCTSTR drive)
 {
-	if (!('a' <= *drive && *drive <= 'z') ||
-		*(drive + 1) != '\0')
+	if (drive[0] == TEXT('*'))
+	{
+		return MountAllESP(true);
+	}
+	else if (('a' <= drive[0] && drive[0] <= 'z') &&
+		drive[1] == TEXT('\0'))
+	{
+		return MountByDrive(drive, true);
+	}
+	else if (('0' <= drive[0] && drive[0] <= '9') &&
+		drive[1] == TEXT('\0'))
+	{
+		return MountByDisk(drive, true);
+	}
+	else
 	{
 		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
 		return -1;
 	}
 
+}
+
+int cmdUnmount(LPCTSTR drive)
+{
+	if (drive[0] == TEXT('*'))
+	{
+		return MountAllESP(false);
+	}
+	else if (('a' <= drive[0] && drive[0] <= 'z') &&
+		drive[1] == TEXT('\0'))
+	{
+		return MountByDrive(drive, false);
+	}
+	else if (('0' <= drive[0] && drive[0] <= '9') &&
+		drive[1] == TEXT('\0'))
+	{
+		return MountByDisk(drive, false);
+	}
+	else
+	{
+		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
+		return -1;
+	}
+}
+
+
+int MountByDrive(LPCTSTR drive, bool isMount)
+{
 	TCHAR path[10] = { 0 };
 	_stprintf_s(path, TEXT("%c:\\"), *drive);
 
@@ -180,63 +226,59 @@ int cmdDrive(LPCTSTR drive)
 		handle = INVALID_HANDLE_VALUE;
 	}
 
-	//mount all ESP partitions
-	if (!MountESP())
-	{
-		tcout << ErrorStrArray[MYERROR_FAIL];
-		return -1;
-	}
-
-	bool isFind = false;
-	map<DEVNUM, PartitionInfo>::iterator espIter;
-	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
-	{
-		if (espIter->second.diskNum == deviceNum.DeviceNumber)
-		{
-			tcout << *(espIter->second.mountDrive) << TEXT("  ");
-			isFind = true;
-		}
-	}
-
-	if (!isFind)
-	{
-		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
-		return -1;
-	}
-
-	return 0;
+	TCHAR diskNum[11];
+	_itot_s(deviceNum.DeviceNumber, diskNum, 10);
+	
+	return MountByDisk(diskNum, isMount);
 }
 
-int cmdDisk(LPCTSTR disk)
+int MountByDisk(LPCTSTR disk, bool isMount)
 {
-	LPCTSTR diskNum = disk;
-	while (*diskNum != '\0')
-	{
-		if (!('0' <= *diskNum && *diskNum <= '9'))
-		{
-			tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
-			return -1;
-		}
-		diskNum++;
-	}
-	
 	DWORD num = _ttoi(disk);
 
-	//mount all ESP partitions
-	if (!MountESP())
-	{
-		tcout << ErrorStrArray[MYERROR_FAIL];
-		return -1;
-	}
-
+	TCHAR mountDrive = TEXT('\0');
 	bool isFind = false;
 	map<DEVNUM, PartitionInfo>::iterator espIter;
 	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
 	{
 		if (espIter->second.diskNum == num)
 		{
-			tcout << *(espIter->second.mountDrive) << TEXT("  ");
-			isFind = true;
+			if (isMount)
+			{
+				if (espIter->second.mountDrive[0] == TEXT('\0'))
+				{//indicate this ESP partition has not been mounted, so to mount it
+
+					if ((mountDrive = MountPartition(espIter->first)) != TEXT('\0'))
+					{//mount successfully
+						_stprintf_s(espIter->second.mountDrive, TEXT("%c:"), mountDrive);
+						tcout << *(espIter->second.mountDrive) << TEXT("  ");
+						//record information of current mounted partitions
+						partitionInfo.insert(make_pair(espIter->first, espIter->second));
+						isFind = true;
+					}
+				}
+				else
+				{//indicate this ESP partition has been mounted, so output its drive letter
+					tcout << *(espIter->second.mountDrive) << TEXT("  ");
+					isFind = true;
+				}
+			}
+			else
+			{
+				if (espIter->second.mountDrive[0] != TEXT('\0'))
+				{//indicate this ESP partition has been mounted, so to unmount it
+
+					if ((mountDrive = MountPartition(espIter->first,
+						espIter->second.mountDrive, true)) == espIter->second.mountDrive[0])
+					{//unmount successfully
+						_stprintf_s(espIter->second.mountDrive, TEXT(""));
+						tcout << mountDrive << TEXT("  ");
+						//record information of current mounted partitions
+						partitionInfo.erase(espIter->first);
+						isFind = true;
+					}
+				}
+			}
 		}
 	}
 
@@ -245,14 +287,19 @@ int cmdDisk(LPCTSTR disk)
 		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
 		return -1;
 	}
+	else
+		tcout << endl;
+
 	return 0;
 }
 
+
 ParameterEntry ParameterTable[] =
 {
-	{ TEXT("drive"), cmdDrive, TEXT("") },
-	{ TEXT("disk"), cmdDisk, TEXT("") }
+	{ TEXT("mount"), cmdMount, TEXT("") },
+	{ TEXT("unmount"), cmdUnmount, TEXT("") }
 };
+
 
 
 void PreProcessArg(TCHAR* str)
@@ -288,6 +335,21 @@ bool PreProcessMount()
 		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
 		return false;
 	}
+
+	map<DEVNUM, PartitionInfo>::iterator espIter, partitionIter;
+	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
+	{
+		if ((partitionIter = partitionInfo.find(espIter->first))
+			!= partitionInfo.end())
+		{
+			//indicates this ESP partition has been mounted
+			//set mountDrive item of ESP partition
+			//mountDrive item indicates whether this ESP partition has been mounted
+			_tcscpy_s(espIter->second.mountDrive,
+				partitionIter->second.mountDrive);
+		}
+	}
+
 	return true;
 }
 
@@ -297,8 +359,12 @@ int _tmain(int argc, TCHAR* arg[])
 	tcout.imbue(std::locale("chinese"));
 
 	int firstArg = 1;
+	bool res = true;
 	int sizeParameterTable = sizeof(ParameterTable) / sizeof(ParameterEntry);
 	
+	if (!PreProcessMount())
+		return MYERROR_FAIL;
+
 	//According parameters to the called function
 	while (argc > firstArg)
 	{
@@ -311,8 +377,8 @@ int _tmain(int argc, TCHAR* arg[])
 			{
 				if (_tcslen(arg[firstArg]) > _tcslen(ParameterTable[index].cmd) + 2)
 				{
-					int res = ParameterTable[index].fun(&(arg[firstArg][_tcslen(ParameterTable[index].cmd) + 2]));
-					return res ? MYERROR_FAIL : MYERROR_SUCCESS;
+					int ret = ParameterTable[index].fun(&(arg[firstArg][_tcslen(ParameterTable[index].cmd) + 2]));
+					if (ret) res = false;
 				}
 				else
 				{
@@ -329,20 +395,13 @@ int _tmain(int argc, TCHAR* arg[])
 		//tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
 		//return MYERROR_NONE_PARAMETER;
 
-		//call program without parameters will mount all ESP partitions
-		if (MountESP())
-			return MYERROR_SUCCESS;
-		else
-			return MYERROR_FAIL;
+		//call program without parameters will show usage
+		Usage();
 			
 	}
-	else
-	{
-		tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
-		return MYERROR_FAIL;
-	}
 	
-
+	//return success if all calls succeed
+	return res ? MYERROR_SUCCESS : MYERROR_FAIL;
 
 }
 
@@ -470,12 +529,12 @@ HANDLE GetDiskHandleByNum(int num)
 
 
 /**************
-*	function: bool GetPartitionInfo(..);
+*	function: bool GetAllPartitionInfo(..);
 *	work: get all partitions information in one disk
 *	return:
 *	return true if success, otherwise false
 **************/
-bool GetPartitionInfo(HANDLE diskHandle, DRIVE_LAYOUT_INFORMATION_EX* info, int infoSize)
+bool GetAllPartitionInfo(HANDLE diskHandle, DRIVE_LAYOUT_INFORMATION_EX* info, int infoSize)
 {
 	BOOL res = 0;
 
@@ -641,7 +700,7 @@ bool GetAllESP()
 		handle = GetDiskHandleByNum(diskInfo.aryDisk[disktotal]);
 		if (INVALID_HANDLE_VALUE == handle)
 			goto ERROR_EXIT;
-		if (!GetPartitionInfo(handle, partitionInfo, sizeof(partitionInfo)))
+		if (!GetAllPartitionInfo(handle, partitionInfo, sizeof(partitionInfo)))
 			goto ERROR_EXIT;
 		if (PARTITION_STYLE_GPT == partitionInfo->PartitionStyle)
 		{
@@ -785,46 +844,124 @@ const TCHAR MountPartition(
 
 
 
-bool MountESP()
+int MountAllESP(bool isMount)
 {
-	if (!PreProcessMount())
-		return false;
+	int res = -1;		//-1 indicates fail
 
-	bool res = false;
-	TCHAR mountDrive = '\0';
+	TCHAR mountDrive = TEXT('\0');
 	map<DEVNUM, PartitionInfo>::iterator espIter, partitionIter;
-	
 	for (espIter = allESP.begin(); espIter != allESP.end(); espIter++)
 	{
-		if ((partitionIter = partitionInfo.find(espIter->first))
-			!= partitionInfo.end())
-		{
-			//indicates this ESP partition has been mounted
-			//set mountDrive item of ESP partition
-			_tcscpy_s(espIter->second.mountDrive,
-				partitionIter->second.mountDrive);
-			//do not need to mount this esp partition
-			//output drive letter direct, such as D:disk0  
-			tcout << espIter->second.mountDrive[0] << TEXT(":disk")
-				<< espIter->second.diskNum << TEXT("  ");
-			res = true;
-		}
-		else
+		//will mount all ESP partitions
+		if (isMount)
 		{
 			//indicates this ESP partition hasn't been mounted
 			//To mount the esp partition
-			if (mountDrive = MountPartition(espIter->first))
+			if (espIter->second.mountDrive[0] == TEXT('\0'))
 			{
-				//set mountDrive item of ESP partition
-				_stprintf_s(espIter->second.mountDrive, TEXT("%c:"), mountDrive);
-				//output format, such as E:disk2
-				tcout << mountDrive << TEXT(":disk")
+				if (mountDrive = MountPartition(espIter->first))
+				{
+					//set mountDrive item of ESP partition
+					_stprintf_s(espIter->second.mountDrive, TEXT("%c:"), mountDrive);
+					//output format, such as E:disk2
+					tcout << mountDrive << TEXT(":disk")
+						<< espIter->second.diskNum << TEXT("  ");
+					//record information of current mounted partitions
+					partitionInfo.insert(make_pair(espIter->first, espIter->second));
+					res = 0;	//0 indicate success
+				}
+			}
+			else
+			{
+				//indicates this ESP partition has been mounted
+				//so output drive letter of the ESP partition mounted
+				tcout << espIter->second.mountDrive[0] << TEXT(":disk")
 					<< espIter->second.diskNum << TEXT("  ");
-				res = true;
+				res = 0;	//0 indicate success
+			}
+
+
+		}
+		else   //will unmount all ESP partitions
+		{
+			//indicates this ESP partition has been mounted
+			//so will be unmount
+			if (espIter->second.mountDrive[0] != TEXT('\0'))
+			{
+				if ((mountDrive = MountPartition(espIter->first, 
+					espIter->second.mountDrive, true)) == espIter->second.mountDrive[0])
+				{
+					//unmount successfully
+					_stprintf_s(espIter->second.mountDrive, TEXT(""));
+					//output format, such as E:disk2
+					tcout << mountDrive << TEXT(":disk")
+						<< espIter->second.diskNum << TEXT("  ");
+					//update information of current mounted partitions
+					partitionInfo.erase(espIter->first);
+					res = 0;	//0 indicate success
+				}
+
 			}
 		}
 	}
-	if (res) tcout << endl;
+
+	if (res)
+		tcout << ErrorStrArray[MYERROR_CANNOT_FIND_ESP];
+	else
+		tcout << endl;		//0 indicate success
+
 	return res;
+}
+
+
+
+int Usage()
+{
+	tcout << endl << TEXT("Findesp,一个为了方便重装系统,挂载或卸载esp分区的辅助工具.");
+	tcout << endl << TEXT("开发: 计算机协会 Bluer  QQ: 905750221");
+	tcout << endl << TEXT("版本: 2.0");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("用法:");
+	tcout << endl << TEXT("    Findesp [-mount:<[盘符]|[磁盘号]|[*]>]|[-unmount:<[盘符]|[磁盘号]|[*]>]");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("选项:");
+	tcout << endl << TEXT("    不带参数");
+	tcout << endl << TEXT("    例子:Findesp");
+	tcout << endl << TEXT("    输出Findesp的使用说明");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    挂载ESP分区--");
+	tcout << endl << TEXT("    -mount:<盘符a-z>");
+	tcout << endl << TEXT("    例子:Findesp -mount:C");
+	tcout << endl << TEXT("    将C盘所在磁盘的所有esp分区挂载,已挂载的不会重复挂载,并输出挂载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -mount:<磁盘号0-9>");
+	tcout << endl << TEXT("    例子:Findesp -mount:0");
+	tcout << endl << TEXT("    将磁盘0中所有的esp分区挂载,已挂载的不会重复挂载,并输出挂载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -mount:*");
+	tcout << endl << TEXT("    例子:Findesp -mount:*");
+	tcout << endl << TEXT("    将全部磁盘的所有esp分区挂载,已挂载的不会重复挂载,并输出挂载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    卸载ESP分区--");
+	tcout << endl << TEXT("    -unmount:<盘符a-z>");
+	tcout << endl << TEXT("    例子:Findesp -unmount:C");
+	tcout << endl << TEXT("    将C盘所在磁盘的所有esp分区卸载,已卸载的不会重复卸载,并输出卸载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -unmount:<磁盘号0-9>");
+	tcout << endl << TEXT("    例子:Findesp -unmount:0");
+	tcout << endl << TEXT("    将磁盘0中所有的esp分区卸载,已卸载的不会重复卸载,并输出卸载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -unmount:*");
+	tcout << endl << TEXT("    例子:Findesp -unmount:*");
+	tcout << endl << TEXT("    将全部磁盘的所有esp分区卸载,已卸载的不会重复卸载,并输出卸载的盘符,如果不成功或没有esp分区则输出error");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    如果传入多个有效参数");
+	tcout << endl << TEXT("    例子:Findesp -mount:D -unmount:1 -mount:*");
+	tcout << endl << TEXT("    按顺序执行 -mount:D, -unmont:1, -mount:*对应的操作,并按顺序输出对应文字.");
+	tcout << endl << TEXT("");
+	tcout << endl << TEXT("");
+
+
+	return 0;
 }
 
