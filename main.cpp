@@ -36,7 +36,7 @@ typedef enum
 enum 
 {
 	MAX_DISK_NUM = 32,
-	MAX_FILE_SYSTEM_NAME_SIZE = 10
+	MAX_FILE_SYSTEM_NAME_SIZE = 20
 };
 
 
@@ -369,6 +369,16 @@ int _tmain(int argc, TCHAR* arg[])
 	bool res = true;
 	int sizeParameterTable = sizeof(ParameterTable) / sizeof(ParameterEntry);
 	
+	if (argc == 1)
+	{
+		//tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
+		//return MYERROR_NONE_PARAMETER;
+
+		//call program without parameters will show usage
+		Usage();
+		return MYERROR_SUCCESS;
+	}
+
 	if (!PreProcessMount())
 		return MYERROR_FAIL;
 
@@ -405,15 +415,6 @@ int _tmain(int argc, TCHAR* arg[])
 		}
 
 		firstArg++;
-	}
-	if (argc == 1)
-	{
-		//tcout << ErrorStrArray[MYERROR_NONE_PARAMETER];
-		//return MYERROR_NONE_PARAMETER;
-
-		//call program without parameters will show usage
-		Usage();
-			
 	}
 	
 	//return success if all calls succeed
@@ -586,7 +587,7 @@ bool GetCurDriveInfo()
 	
 	DWORD len = ::GetLogicalDriveStrings(sizeof(Drive) / sizeof(TCHAR), Drive);
 	if (len <= 0)
-		goto ERROR_EXIT;
+		return false;
 	
 	partitionInfo.clear();
 
@@ -594,12 +595,26 @@ bool GetCurDriveInfo()
 	{
 		//cout << Drive[i] << endl;		//optput such as C:\\
 
+		if (DRIVE_FIXED != GetDriveType(&Drive[i]))
+		{
+			i += (_tcslen(&Drive[i]) + 1);
+			continue;	//skip other type partitions, except for hard disk type
+		}
+			
+
 		//get the file system type name
 		if (!GetVolumeInfo(
 			&Drive[i],
 			info.fileSystem,
 			MAX_FILE_SYSTEM_NAME_SIZE))
-			goto ERROR_EXIT;
+		{
+			//tcout << TEXT("error: GetVolumeInfo() ") << GetLastError() << TEXT("  ");
+			//tcout << &Drive[i] << endl;
+
+			i += (_tcslen(&Drive[i]) + 1);
+			continue;	//skip partition that is corrupted
+		}
+			
 
 		_stprintf_s(driveName, TEXT("\\\\.\\%c:"), Drive[i]);
 		partition = CreateFile(driveName,
@@ -611,13 +626,38 @@ bool GetCurDriveInfo()
 			NULL);
 		
 		if (INVALID_HANDLE_VALUE == partition)
-			goto ERROR_EXIT;
+		{
+			//tcout << TEXT("error: createfile() ") << GetLastError() << TEXT("  ");
+			//tcout << driveName << endl;
+
+			i += (_tcslen(&Drive[i]) + 1);
+			continue;	//something wrong, and switch to next partition
+		}
+			
 
 		//get the partition number and disk number
 		if (!GetDeviceNumber(partition, &deviceNumber))
-			goto ERROR_EXIT;
+		{
+			//tcout << TEXT("error: GetDeviceNumber() ") << GetLastError() << TEXT("  ");
+			//tcout << driveName << TEXT("  -b- ");
+			//tcout << TEXT("DeviceNumber: ") << deviceNumber.DeviceNumber << TEXT("  ");
+			//tcout << TEXT("PartitionNumber: ") << deviceNumber.PartitionNumber << endl;
+
+			CloseHandle(partition);
+			partition = INVALID_HANDLE_VALUE;
+			i += (_tcslen(&Drive[i]) + 1);
+			//some partitions in PE system are judged as hard disk, 
+			//but they do not have the disk number and partition number.
+			//so skip them
+			continue;	//something wrong, and switch to next partition.
+		}
+			
+		//tcout << driveName << TEXT("  -a- ");
+		//tcout << TEXT("DeviceNumber: ") << deviceNumber.DeviceNumber << TEXT("  ");
+		//tcout << TEXT("PartitionNumber: ") << deviceNumber.PartitionNumber << endl;
 
 		CloseHandle(partition);
+		partition = INVALID_HANDLE_VALUE;
 
 		//record partition information
 		_stprintf_s(info.mountDrive, TEXT("%c:"), Drive[i]);
@@ -634,10 +674,6 @@ bool GetCurDriveInfo()
 	}
 
 	return true;
-
-ERROR_EXIT:
-	partitionInfo.clear();
-	return false;
 }
 
 
@@ -732,7 +768,7 @@ bool GetAllESP()
 					{
 						TCHAR fileSystem[10];
 						GetVolumeInfo(tmpTargetName, fileSystem, 10);
-						//ESP partition filesystem is fat or fat32
+						//ESP partition file system is fat or fat32
 						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 ||
 							 _tcsicmp(fileSystem, TEXT("fat16")) == 0 ||
 							_tcsicmp(fileSystem, TEXT("fat32")) == 0)
