@@ -4,7 +4,6 @@
 #include <iostream>  
 #include <TCHAR.H>
 #include <setupapi.h>	//the head file of Setup API 
-#include <vector>
 #include <map>
 #pragma comment( lib, "setupapi.lib" )
 using namespace std;
@@ -30,7 +29,8 @@ typedef enum
 	MYERROR_CANNOT_GET_ESP_INFO,
 	MYERROR_NOT_EXIST_DRIVE,
 	MYERROR_NOT_EXIST_DISK,
-	MYERROR_CANNOT_FIND_ESP
+	MYERROR_CANNOT_FIND_ESP,
+	MYERROR_ALL_DRIVE_USED
 }ERROR_CODE;
 
 enum 
@@ -103,7 +103,9 @@ LPCTSTR ErrorStrArray[] =
 	//MYERROR_NOT_EXIST_DISK
 	TEXT("error: input a disk that does not exist.\n"),
 	//MYERROR_CANNOT_FIND_ESP
-	TEXT("error: can't find ESP partitions.\n")
+	TEXT("error: can't find ESP partitions.\n"),
+	//MYERROR_ALL_DRIVE_USED
+	TEXT("error: all drive letters are being used.\n")
 };
 
 typedef int(*ParameterFun)(LPCTSTR arg1);
@@ -112,7 +114,6 @@ typedef struct
 {
 	LPCTSTR cmd;
 	ParameterFun fun;
-	LPCTSTR arg1;
 }ParameterEntry;
 
 bool GetAllDiskNum();		//enum the disk to get all disk information
@@ -122,6 +123,7 @@ bool GetCurDriveInfo();
 int MountAllESP(bool isMount);
 bool GetAllESP();
 int cmdDisk(LPCTSTR disk);
+int cmdShowCurDrive(LPCTSTR);
 int MountByDrive(LPCTSTR drive, bool isMount);
 int MountByDisk(LPCTSTR disk, bool isMount);
 int Usage();
@@ -139,7 +141,9 @@ const TCHAR MountPartition(
 
 int cmdMount(LPCTSTR drive)
 {
-	if (drive[0] == TEXT('*'))
+	//must check drive is null or not first
+	if (drive == nullptr ||
+		drive[0] == TEXT('*'))
 	{
 		return MountAllESP(true);
 	}
@@ -163,7 +167,9 @@ int cmdMount(LPCTSTR drive)
 
 int cmdUnmount(LPCTSTR drive)
 {
-	if (drive[0] == TEXT('*'))
+	//must check drive is null or not first
+	if (drive == nullptr ||
+		drive[0] == TEXT('*'))
 	{
 		return MountAllESP(false);
 	}
@@ -296,8 +302,9 @@ int MountByDisk(LPCTSTR disk, bool isMount)
 
 ParameterEntry ParameterTable[] =
 {
-	{ TEXT("mount"), cmdMount, TEXT("") },
-	{ TEXT("unmount"), cmdUnmount, TEXT("") }
+	{ TEXT("mount"), cmdMount },
+	{ TEXT("unmount"), cmdUnmount },
+	{ TEXT("show"), cmdShowCurDrive }
 };
 
 
@@ -372,19 +379,28 @@ int _tmain(int argc, TCHAR* arg[])
 		for (int index = 0; index < sizeParameterTable; index++)
 		{
 			if((_tcsstr(arg[firstArg], ParameterTable[index].cmd) - arg[firstArg] == 1) &&
-				(arg[firstArg][0] == '-' || arg[firstArg][0] == '/') && 
-				arg[firstArg][_tcslen(ParameterTable[index].cmd) + 1] == ':')
+				(arg[firstArg][0] == '-' || arg[firstArg][0] == '/') )
 			{
-				if (_tcslen(arg[firstArg]) > _tcslen(ParameterTable[index].cmd) + 2)
+				if (arg[firstArg][_tcslen(ParameterTable[index].cmd) + 1] == ':')
 				{
-					int ret = ParameterTable[index].fun(&(arg[firstArg][_tcslen(ParameterTable[index].cmd) + 2]));
-					if (ret) res = false;
+					if (_tcslen(arg[firstArg]) > _tcslen(ParameterTable[index].cmd) + 2)
+					{	//input parameters like -mount:C
+						int ret = ParameterTable[index].fun(&(arg[firstArg][_tcslen(ParameterTable[index].cmd) + 2]));
+						if (ret) res = false;	//ret == -1, indicates program fail
+					}
+					else
+					{	//input parameters like -mount:
+						tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
+						return MYERROR_FAIL;
+					}
 				}
-				else
+				else if (arg[firstArg][_tcslen(ParameterTable[index].cmd) + 1] == '\0')
 				{
-					tcout << ErrorStrArray[MYERROR_INVALID_PARAMETER];
-					return MYERROR_FAIL;
+					//input parameters like -show, which don't need to input additional parameters
+					int ret = ParameterTable[index].fun(nullptr);
+					if (ret) res = false;	//ret == -1, indicates program fail
 				}
+
 			}
 		}
 
@@ -718,7 +734,8 @@ bool GetAllESP()
 						GetVolumeInfo(tmpTargetName, fileSystem, 10);
 						//ESP partition filesystem is fat or fat32
 						if (_tcsicmp(fileSystem, TEXT("fat")) == 0 ||
-							 _tcsicmp(fileSystem, TEXT("fat32")) == 0)
+							 _tcsicmp(fileSystem, TEXT("fat16")) == 0 ||
+							_tcsicmp(fileSystem, TEXT("fat32")) == 0)
 						{
 							memset(&info, 0, sizeof(info));
 
@@ -816,6 +833,10 @@ const TCHAR MountPartition(
 			_stprintf_s(drive, TEXT("B:"));
 			if (QueryDosDevice(drive, targetName, MAX_PATH + 1) == 0)
 				isFind = true;
+		}
+		else if(!isFind)	//indicate all drive letters are being used 
+		{
+			tcout << ErrorStrArray[MYERROR_ALL_DRIVE_USED];
 		}
 	}
 	else	//user custom dos name
@@ -922,7 +943,7 @@ int Usage()
 	tcout << endl << TEXT("版本: 2.0");
 	tcout << endl << TEXT("");
 	tcout << endl << TEXT("用法:");
-	tcout << endl << TEXT("    Findesp [-mount:<[盘符]|[磁盘号]|[*]>]|[-unmount:<[盘符]|[磁盘号]|[*]>]");
+	tcout << endl << TEXT("    Findesp [-mount:[盘符]|[磁盘号]|[*]] [-unmount:[盘符]|[磁盘号]|[*]] [-show]");
 	tcout << endl << TEXT("");
 	tcout << endl << TEXT("选项:");
 	tcout << endl << TEXT("    不带参数");
@@ -938,8 +959,9 @@ int Usage()
 	tcout << endl << TEXT("    例子:Findesp -mount:0");
 	tcout << endl << TEXT("    将磁盘0中所有的esp分区挂载,已挂载的不会重复挂载,并输出挂载的盘符,如果不成功或没有esp分区则输出error");
 	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -mount");
 	tcout << endl << TEXT("    -mount:*");
-	tcout << endl << TEXT("    例子:Findesp -mount:*");
+	tcout << endl << TEXT("    例子:Findesp -mount:* 或 Findesp -mount");
 	tcout << endl << TEXT("    将全部磁盘的所有esp分区挂载,已挂载的不会重复挂载,并输出挂载的盘符,如果不成功或没有esp分区则输出error");
 	tcout << endl << TEXT("");
 	tcout << endl << TEXT("    卸载ESP分区--");
@@ -951,17 +973,58 @@ int Usage()
 	tcout << endl << TEXT("    例子:Findesp -unmount:0");
 	tcout << endl << TEXT("    将磁盘0中所有的esp分区卸载,已卸载的不会重复卸载,并输出卸载的盘符,如果不成功或没有esp分区则输出error");
 	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -unmount");
 	tcout << endl << TEXT("    -unmount:*");
-	tcout << endl << TEXT("    例子:Findesp -unmount:*");
+	tcout << endl << TEXT("    例子:Findesp -unmount:* 或 Findesp -unmount");
 	tcout << endl << TEXT("    将全部磁盘的所有esp分区卸载,已卸载的不会重复卸载,并输出卸载的盘符,如果不成功或没有esp分区则输出error");
 	tcout << endl << TEXT("");
 	tcout << endl << TEXT("    如果传入多个有效参数");
 	tcout << endl << TEXT("    例子:Findesp -mount:D -unmount:1 -mount:*");
 	tcout << endl << TEXT("    按顺序执行 -mount:D, -unmont:1, -mount:*对应的操作,并按顺序输出对应文字.");
 	tcout << endl << TEXT("");
+	tcout << endl << TEXT("    -show");
+	tcout << endl << TEXT("    例子:Findesp -show");
+	tcout << endl << TEXT("    输出当前已有盘符");
 	tcout << endl << TEXT("");
-
+	tcout << endl << TEXT("");
 
 	return 0;
 }
 
+
+int cmdShowCurDrive(LPCTSTR)
+{
+	TCHAR Drive[MAX_PATH] = { 0 };
+	DWORD i = 0, total = 0;
+	DWORD len = ::GetLogicalDriveStrings(sizeof(Drive) / sizeof(TCHAR), Drive);
+	if (len <= 0)
+		return -1;
+	while (Drive[i])
+	{
+
+		tcout << Drive[i];// << TEXT("  ");
+
+		switch (GetDriveType(&Drive[i]))
+		{
+		case DRIVE_FIXED:
+			tcout << TEXT(":hd  ");
+			break;
+		case DRIVE_REMOVABLE:
+			tcout << TEXT(":usb  ");
+			break;
+		case DRIVE_CDROM:
+			tcout << TEXT(":cd  ");
+			break;
+		case DRIVE_REMOTE:
+			tcout << TEXT(":net  ");
+			break;
+		case DRIVE_RAMDISK:
+			tcout << TEXT(":ram  ");
+			break;
+		}
+
+		i += (_tcslen(&Drive[i]) + 1);
+	}
+	tcout << endl;
+	return 0;
+}
